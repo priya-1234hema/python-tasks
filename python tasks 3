@@ -1,0 +1,184 @@
+print("PYTHON TASK 3")
+print("1.comparing no's whether even or odd")
+a=13
+if a%2==0:
+    print("a is even")
+else:
+    print("a is odd")
+print("2. to check if number is negative or positive")
+number=0
+if number>0:
+      print("the number is positive")
+elif number<0:
+    print("the number is negative")
+else:
+    print("the number is zero")
+    
+number=10
+if number>0:
+      print("the number is positive")
+elif number<0:
+    print("the number is negative")
+else:
+    print("the number is zero")
+
+number=0.0
+if number>0:
+      print("the number is positive")
+elif number<0:
+    print("the number is negative")
+else:
+    print("the number is zero")
+print("3.whether number is divisible by 2 & 5")
+value=int(input("enter value"))
+if value%2==0 and value%5==0:
+    print("the number is divisible by 2 & 5")
+elif value%2==0:
+    print("the number is divisible by 2")
+elif value%5==0:
+    print("the number is divisible by 5")
+else:
+    print("the number is not divisible by both 2 & 5")
+print("4.marks of a student")
+marks=int(input("enter your marks"))
+if marks>=90:
+    print("GRADE A")
+elif marks>=80:
+    print("GRADE B")
+elif marks>=70:
+    print("GRADE C")
+elif marks>=60:
+    print("GRADE D")
+else:
+    print("GRADE E")
+print("5.leap year check")
+year=int(input("enter year"))
+if year%4==0:
+    print("the year is a leap year")
+number=int(input("enter number"))
+if number%100==0 and number%400:
+    print("the number is divisible by 100 & 400")
+elif number%100==0:
+    print("the number is divisible by 100")
+elif number%400==0:
+    print("the number is divisible by 400")
+elif number%100!=0 and number%400!=0:
+    print("the number is divisible by 100")
+else:
+    print("the year is not a leap year")
+print("6.numbers from 1 to 10")
+for i in range(1,11):
+    print(i)
+print("7.numbers from 1 to 10 and squaring them")
+for i in range(1,11):
+    print(i)
+    j=i**2
+    print(j)
+#print("8.10 to 1 in reverse order")
+for i in range(10,0,-1):
+    print(i)
+print("9.Age Category")
+age=int(input("enter your age"))
+if 0<=age<=12:
+    print("child")
+elif 13<=age<=19:
+    print("teen")
+elif 20<=age<=59:
+    print("adult")
+elif age>=60:
+    print("senior")
+else:
+    ("not found in list")
+print("10.checking if cube is greater than 100")
+a=int(input("enter number"))
+if a*a*a==100:
+    print("the cube is equal to 100")
+elif a*a*a>100:
+    print("the cube is above 100")
+elif a*a*a<100:
+    print("the cube is below 100")
+else:
+    print("not in list")
+print("11.login system")
+username=input("enter username")
+password=input("enter password")
+if username=="hema":
+    print("hema")  
+    if password=="1234":
+        print("login successful")
+    else:
+        print("incorrect password")
+else:
+    print("incorrect username")
+
+numbers=[1,2,3,4,5,6,7,8,9,10]
+result=list(map(lambda x:x*10,filter(lambda x:x%2==0,numbers)))
+print(result)
+#17.star patterns
+n=int(input("enter a number"))
+for i in range(n):
+    for j in range(i+1):
+        print("*",end=" ")
+
+    print()
+
+n =int(input("enter a number"))
+for i in range(n):
+    for j in range(i,n):
+        print("*",end=" ")
+
+    print()
+#inverted pyramid
+n=int(input("enter a number"))
+for i in range(n):
+    for j in range(i+n):
+        print(" ",end="")
+    for k in range(i,n):
+        print("*",end=" ")
+
+    print()
+#square pattern
+n=int(input("enter a number"))
+for i in range(n):
+    for j in range(n):
+        print("*",end=" ")
+    print()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
