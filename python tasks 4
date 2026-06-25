@@ -1,0 +1,20 @@
+#python task 4
+#1.
+a=("blackhole")
+print(a.count("l"))
+#3.
+text=("she has beautiful flowers")
+print(text.upper())
+print(text.upper().split())
+#5.
+A={"name":"india","verb":"is a","longest word":"wonderful","quality":"place"}
+print(A["longest word"])
+#6.
+a=input("enter")
+b=a[::-1]
+print(b)
+if a==b:
+  print("palindrome")
+a=("india is wonderful")
+b=a[::-1]
+print(b)
