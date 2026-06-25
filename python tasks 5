@@ -1,0 +1,93 @@
+#python task 5
+#list tasks
+#1&2&3
+S=["priya","hema","divya","harini"]
+print(S.append("sweetha"))
+print(S)
+print(S.remove("priya"))
+print(S)
+#4&5&6
+v=[1,2,3,4,5]
+for i in range(1,6):
+    print(i,end=" ")
+A=int(input("enter your list"))
+if A%2==0:
+    print(even)
+elif A%2==1:
+    print(odd)
+else:
+    print("not in list")
+v=[1,2,3,4,5]
+print(v.reverse())
+print(v)
+A=["black","pink","green","purple"]
+print(A.sort())
+print(A)
+#tuple task
+#1.
+A=(11,21,31,41,51)
+print(A)
+#2.
+print(A.index(11))
+print(A.index(21))
+print(A.index(31))
+print(A.index(41))
+print(A.index(51))
+#3.
+print(len(A))
+#4
+A=(100,222,110,100,200,332)
+print(A.count(100))
+#5.
+print(A.index(332))
+#7.
+a=(1,3,5,7,9)
+x=list(a)
+print(x)
+#8.
+b={1,2,3,4,5}
+x=tuple(b)
+print(x)
+#set tasks
+#1.
+x={20,30,40,50}
+print(x)
+#2.
+print(x.add(10))
+print(x)
+#.3
+print(x.discard(30))
+print(x)
+#4.
+a={11,22,33,44,55}
+b={11,22}
+print(a|b)
+#5.
+print(a&b)
+#6.
+print(a^b)
+#8.
+print(a.issubset(b))
+print(a.issuperset(b))
+print(b.issubset(a))
+print(b.issuperset(a))
+#10.
+a=[10,20,30,40,50,60,70,80,90,100]
+x=set(a)
+print(x)
+#dictionary tasks
+#1.
+d={"name":"priya","marks":"91"}
+print(d)
+#2.
+d["grade"]="grade A"
+print(d)
+#3.
+d.update({"class":"12th","section":"A"})
+print(d)
+#5.
+print(d.keys())
+print(d.values())
+
+
+
