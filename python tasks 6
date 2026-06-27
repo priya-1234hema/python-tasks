@@ -1,0 +1,97 @@
+#python tasks 6
+#2.
+def add(a,b):
+    print(a+b)
+add(23,24)
+def add(a,b):
+    return a+b
+k=add(7,34)
+print(k)
+#3.
+def add(a,b):
+    return a+b
+k=add(131,345)
+print(k)
+def divide(a,b):
+    return a/b
+k=divide(200,4)
+print(k)
+#4.
+numbers=[22,34,56]
+f=list(filter(lambda x:x>50,numbers))
+print(f)
+#5.
+def details(name,marks,grade):
+    print("the student name is",name)
+    print("the student mark is ",marks)
+    print("the grade of the student is",grade)
+details(grade="A",marks=98,name="hema")
+def details(**student):
+    print(student)
+details(grade="A",marks=98,name="hema",talent="memory power",dob="8th july 1983")'''
+'''#6.
+def area(l,b):
+    print("the length of the rectangle is",l)
+    print("the breadth of the rectangle is",b)
+area(12,3)
+l=12
+b=3
+print("area=l*b")
+print(l*b)
+#7.
+def interest(rate="5%"):
+    print("the interest rate is",rate)
+interest()
+#9.
+def sum(*sum):
+    print(sum)
+sum(1+2+3)
+#11
+def details(**details):
+    print(details)
+details(name="priya",products="20",amount="220Rs")
+#12.
+def employee(**details):
+    print(details)
+employee(name="devavarshini",company="abc",salary="200000")
+#13.
+p=lambda p:p*p
+print(p(12))
+#14.
+a=[10,100]
+f=list(filter(lambda x:x>50,a))
+print(f)
+#15.
+celsius=[10,20,30,40,50]
+f=list(map(lambda x:x*9/5+32,celsius))
+print(f)
+#16.
+squares=[2,3,4,5,6]
+f=list(map(lambda x:x*x,squares))
+print(f)
+#17.
+numbers=[2,3,4,5,6,1,7,8,10,9]
+f=list(filter(lambda x:x%2==0,numbers))
+print(f)
+#18.
+numbers=[30,30,245,16,100,101,235,678,22,33.343]
+f=list(filter(lambda x:x>=100,numbers))
+print(f)
+#19.
+def power(n):
+    if n==1:
+        return 1
+    else:
+        return n*5
+print(power(5))'''
+
+
+
+
+
+
+
+
+
+
+
