@@ -1,0 +1,38 @@
+import math
+#constants
+'''print(math.pi)
+print(math.tau)
+print(math.inf)
+print(math.nan)
+
+#basic functions
+print(math.sqrt(49))
+print(math.pow(3,3))
+print(math.fabs(-99))
+print(math.factorial(6))
+print(math.gcd(12,15))
+print(math.lcm(2,4))
+
+#rounding functions
+print(math.ceil(4.5))
+print(math.floor(5.6))
+print(math.trunc(4.8))
+print(round(9.987,2))
+
+#trinometric functions
+print(math.sin(math.pi/2))
+print(math.cos(0))
+print(math.tan(math.pi/4))
+print(math.acos(1))
+print(math.atan(1))
+
+#logarthimic functions
+print(math.log(100,10))
+print(math.log(10,100))
+print(math.log2(10))
+print(math.exp(2))
+print(math.expm1(1))
+#hyperbolic functions
+print(math.sinh(1))
+print(math.cosh(1))
+print(math.tanh(1))'''
