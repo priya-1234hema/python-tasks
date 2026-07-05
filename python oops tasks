@@ -1,0 +1,149 @@
+#oops tasks
+#1.
+class restaurant:
+    def main(self):
+        print("the main menu")
+class Pizza_restaurant(restaurant):
+    def pizza(self):
+        print("pizza varieties")
+        print("cheese pizza---Rs899")
+        print("paneer pizza---Rs1000")
+        print("veg pizza---Rs789")
+        print("chicken pizza---Rs1299")
+class Burger_restaurant(restaurant):
+    def burger(self):
+        print(" the burger varieties")
+        print("Classic Cheese burger---Rs1099")
+        print("paneer tikka burger---Rs1299")
+        print("BBQ burger---Rs1339")
+        print("smash burger---Rs1000")
+class SouthIndian_resauran(restaurant):
+    def SouthIndian(self):
+        print("the south indian dishes")
+        print("dosa---Rs120")
+        print("idli---Rs80")
+        print("pongal---Rs150")
+        print("puri---Rs100")
+        print("chapathi---Rs50")
+a1=Burger_restaurant()
+a1.burger()
+#2.
+class Paymentmethod:
+    def payment(self):
+        print("Choose your payment method")
+class UPI(Paymentmethod):
+    def upi(self):
+        print("choose your option")
+        print("google pay")
+        print("phone pay")
+        print("paytm")
+class CREDITCARD(Paymentmethod):
+    def Credit(self):
+        print("choose your bank account")
+        print("icici")
+        print("axis")
+        print("SBI")
+class NETBANKING(Paymentmethod):
+    def Netbanking(self):
+        print("choose your bank account")
+        print("icici")
+        print("axis")
+        print("SBI")
+p1=UPI()
+p1.upi()
+#3.
+class SmartDevice:
+    def device(self):
+        print("Choose your Device")
+    def fan(self):
+        print("Atomberg fan")
+        print("rating---*****")
+        print("dust free")
+        print("colour-Royal blue")
+    def light(self):
+        print("Havels")
+        print("rating---*****")
+        print("LED")
+        print("colour-white")
+    def airconditioner(self):
+        print("Samsung")
+        print("rating-****")
+        print("waranty-5years")
+        print("colour-customisable")
+    def smart_appliances(self):
+        self.device()
+        self.fan()
+        self.light()
+        self.airconditioner()
+s1=SmartDevice()
+s1.smart_appliances()
+#4.
+class product:
+    def products(self):
+        print("choose a option")
+    def Electronics(Self):
+        print("choose a device")
+        print("1.light")
+        a={"brand":"havels","price":"RS2399"}
+        print(a)
+        print("2.fan")
+        b={"brand":"atomberg","price":"Rs2500"}
+        print(b)
+    def Clothings(self):
+        print("choose your outfit")
+        print("1.Womens wear")
+        c={"brand":"avasa","price":"Rs679"}
+        print(c)
+        print("2.Mens wear")
+        d={"brand":"polo","price":"Rs1349"}
+        print(d)
+        print("3.kids wear")
+        e={"brand":"H&M kids","price":"Rs1000"}
+        print(e)
+    def Books(self):
+        print("choose your favourite")
+        print("Think like a monk ---price=Rs399")
+        print("The silent patient---price=Rs567")
+    def smart_products(self):
+        self.Electronics()
+        self.Clothings()
+        self.Books()
+p1=product()
+p1.smart_products()
+#5.
+class Ride:
+    def BikeRide(self):
+       print("choose distance")
+a=int(input("enter a distance"))
+if a==10:
+    print("fare=Rs120") 
+elif a==20:
+    print("fare=Rs170")
+elif a==30:
+    print("fare=Rs220")
+else:
+    print("Not in list")
+    def AutoRide(self):
+        print("choose distance")
+a=int(input("enter a distance"))
+if a==10:
+    print("fare=Rs250") 
+elif a==20:
+    print("fare=Rs350")
+elif a==30:
+    print("fare=Rs450")
+else:
+    print("Not in list")
+    def CarRide(self):
+        print("choose distance")
+a=int(input("enter a distance"))
+if a==10:
+    print("fare=500") 
+elif a==20:
+    print("fare=Rs670")
+elif a==30:
+    print("fare=Rs770)
+else:
+    print("Not in list")
+        
+      
