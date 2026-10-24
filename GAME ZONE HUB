@@ -1,0 +1,1156 @@
+import os
+import json
+import math
+import hmac
+import random
+import sqlite3
+import hashlib
+import secrets
+import datetime
+from array import array
+
+import tkinter as tk
+from tkinter import messagebox, ttk
+
+try:
+    import pygame
+    PYGAME_OK = True
+except ImportError:
+    PYGAME_OK = False
+
+try:
+    from matplotlib.figure import Figure
+    from matplotlib.ticker import MaxNLocator
+    from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
+    MPL_OK = True
+except ImportError:
+    MPL_OK = False
+
+
+# =====================================================================
+#  GLOBAL SETTINGS AND CONSTANTS
+# =====================================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.path.join(BASE_DIR, "gamezone.db")
+SETTINGS_PATH = os.path.join(BASE_DIR, "settings.json")
+
+GUEST_NAME = "Guest"
+DEFAULT_SETTINGS = {"sound": True, "theme": "dark"}
+
+THEMES = {
+    "dark": {"bg": "#12122b", "panel": "#1e1e45", "fg": "#ffffff",
+             "muted": "#9aa0c7", "entry": "#2b2b5a", "accent": "#00d4ff"},
+    "light": {"bg": "#eef2ff", "panel": "#ffffff", "fg": "#1b1b2f",
+              "muted": "#5b6080", "entry": "#e3e8ff", "accent": "#0077b6"},
+}
+
+RAINBOW = ["#ff595e", "#ff924c", "#ffca3a", "#8ac926", "#1982c4", "#6a4c93"]
+
+# These are filled in when the program starts
+root = None
+settings = dict(DEFAULT_SETTINGS)
+current_user = None
+
+
+# =====================================================================
+#  DATABASE FUNCTIONS (sqlite3 + hashlib)
+# =====================================================================
+def run_query(sql, params=(), fetch=False):
+    """Run one SQL statement safely and return rows if fetch=True."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall() if fetch else None
+        conn.commit()
+        return rows
+    finally:
+        conn.close()
+
+
+def init_database():
+    """Create the tables the first time the program runs."""
+    run_query("""
+        CREATE TABLE IF NOT EXISTS users (
+            id        INTEGER PRIMARY KEY AUTOINCREMENT,
+            username  TEXT UNIQUE NOT NULL COLLATE NOCASE,
+            salt      TEXT NOT NULL,
+            pw_hash   TEXT NOT NULL,
+            created   TEXT NOT NULL
+        )""")
+    run_query("""
+        CREATE TABLE IF NOT EXISTS scores (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            username   TEXT NOT NULL,
+            game       TEXT NOT NULL,
+            score      INTEGER NOT NULL,
+            played_at  TEXT NOT NULL
+        )""")
+
+
+def hash_password(password, salt=None):
+    """Return (salt, hash). A new random salt is made when none is given."""
+    if salt is None:
+        salt = secrets.token_hex(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"),
+                                 bytes.fromhex(salt), 100000)
+    return salt, digest.hex()
+
+
+def register_user(username, password):
+    """Create a new account. Returns (success, message)."""
+    if len(username) < 3:
+        return False, "Username must be at least 3 characters long."
+    if username.lower() == GUEST_NAME.lower():
+        return False, "That username is reserved. Please choose another."
+    if len(password) < 4:
+        return False, "Password must be at least 4 characters long."
+    salt, pw_hash = hash_password(password)
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    try:
+        run_query("INSERT INTO users (username, salt, pw_hash, created) "
+                  "VALUES (?, ?, ?, ?)", (username, salt, pw_hash, now))
+    except sqlite3.IntegrityError:
+        return False, "Username already exists! Try logging in."
+    return True, "Account registered successfully!\nPlease log in now."
+
+
+def verify_login(username, password):
+    """Return the stored username if the login is correct, else None."""
+    rows = run_query("SELECT username, salt, pw_hash FROM users WHERE username = ?",
+                     (username,), fetch=True)
+    if not rows:
+        return None
+    stored_name, salt, stored_hash = rows[0]
+    _, new_hash = hash_password(password, salt)
+    if hmac.compare_digest(new_hash, stored_hash):
+        return stored_name
+    return None
+
+
+def save_score(username, game, score):
+    """Store one finished game in the scores table."""
+    now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    run_query("INSERT INTO scores (username, game, score, played_at) VALUES (?, ?, ?, ?)",
+              (username, game, int(score), now))
+
+
+def get_top_scores(game=None, limit=10):
+    """Best score of every player. game=None adds up each player's bests."""
+    if game:
+        return run_query(
+            "SELECT username, MAX(score) AS best FROM scores WHERE game = ? "
+            "GROUP BY username ORDER BY best DESC LIMIT ?", (game, limit), fetch=True)
+    return run_query(
+        "SELECT username, SUM(best) AS total FROM ("
+        "  SELECT username, game, MAX(score) AS best FROM scores GROUP BY username, game"
+        ") GROUP BY username ORDER BY total DESC LIMIT ?", (limit,), fetch=True)
+
+
+def get_best_score(username, game):
+    rows = run_query("SELECT MAX(score) FROM scores WHERE username = ? AND game = ?",
+                     (username, game), fetch=True)
+    return rows[0][0] or 0
+
+
+def get_user_history(username):
+    """All games of one player, oldest first: (game, score, played_at)."""
+    return run_query("SELECT game, score, played_at FROM scores "
+                     "WHERE username = ? ORDER BY id", (username,), fetch=True)
+
+
+def delete_user_scores(username):
+    run_query("DELETE FROM scores WHERE username = ?", (username,))
+
+
+# =====================================================================
+#  SETTINGS FUNCTIONS (json)
+# =====================================================================
+def load_settings():
+    data = dict(DEFAULT_SETTINGS)
+    try:
+        with open(SETTINGS_PATH, "r") as file:
+            data.update(json.load(file))
+    except (OSError, ValueError):
+        pass
+    if data.get("theme") not in THEMES:
+        data["theme"] = "dark"
+    return data
+
+
+def save_settings():
+    try:
+        with open(SETTINGS_PATH, "w") as file:
+            json.dump(settings, file, indent=4)
+    except OSError:
+        pass
+
+
+def colors():
+    return THEMES[settings["theme"]]
+
+
+def is_guest():
+    return current_user == GUEST_NAME
+
+
+# =====================================================================
+#  PYGAME HELPERS (window, fonts, sounds, game-over screen)
+# =====================================================================
+_FONTS = {}
+
+
+def init_pygame_window(title, width, height):
+    """Start pygame and open the game window."""
+    _FONTS.clear()
+    pygame.mixer.pre_init(22050, -16, 1, 512)
+    pygame.init()
+    screen = pygame.display.set_mode((width, height))
+    pygame.display.set_caption(title)
+    return screen, pygame.time.Clock()
+
+
+def get_font(size):
+    if size not in _FONTS:
+        _FONTS[size] = pygame.font.SysFont("arial", size, bold=True)
+    return _FONTS[size]
+
+
+def draw_text(screen, text, size, color, center):
+    surface = get_font(size).render(text, True, color)
+    screen.blit(surface, surface.get_rect(center=center))
+
+
+def make_gradient(width, height, top_color, bottom_color):
+    surface = pygame.Surface((width, height))
+    for y in range(height):
+        ratio = y / max(1, height - 1)
+        color = tuple(int(top_color[i] + (bottom_color[i] - top_color[i]) * ratio)
+                      for i in range(3))
+        pygame.draw.line(surface, color, (0, y), (width, y))
+    return surface
+
+
+def tone_samples(freq, ms, volume, rate):
+    """Build a square-wave beep (freq=0 gives silence)."""
+    count = int(rate * ms / 1000)
+    amp = 32767 * volume
+    data = array("h")
+    for i in range(count):
+        if freq == 0:
+            value = 0
+        else:
+            value = amp if int(i * freq * 2 / rate) % 2 == 0 else -amp
+        value *= (1 - i / count)          # fade out so there is no click
+        data.append(int(value))
+    return data
+
+
+def samples_to_sound(samples):
+    """Turn raw samples into a pygame Sound (None if no audio device)."""
+    try:
+        info = pygame.mixer.get_init()
+        if not info or info[1] != -16:
+            return None
+        if info[2] == 2:                   # duplicate samples for stereo
+            stereo = array("h")
+            for s in samples:
+                stereo.append(s)
+                stereo.append(s)
+            samples = stereo
+        return pygame.mixer.Sound(buffer=samples.tobytes())
+    except Exception:
+        return None
+
+
+def make_beep(freq, ms, volume=0.25):
+    info = pygame.mixer.get_init() if pygame.mixer.get_init() else None
+    if not info:
+        return None
+    return samples_to_sound(tone_samples(freq, ms, volume, info[0]))
+
+
+def start_music(sound_on):
+    """Play a quiet looping tune in the background."""
+    if not sound_on:
+        return None
+    info = pygame.mixer.get_init()
+    if not info:
+        return None
+    notes = [523, 659, 784, 659, 587, 740, 880, 740,
+             523, 659, 784, 1046, 880, 784, 659, 587]
+    samples = array("h")
+    for freq in notes:
+        samples.extend(tone_samples(freq, 220, 0.05, info[0]))
+    music = samples_to_sound(samples)
+    if music:
+        music.play(loops=-1)
+    return music
+
+
+def play_sound(sound, sound_on):
+    if sound_on and sound:
+        sound.play()
+
+
+def game_over_screen(screen, score, title="GAME OVER", subtitle="", color=(255, 80, 80)):
+    """Dim the game, show the score and wait for a key press."""
+    width, height = screen.get_size()
+    overlay = pygame.Surface((width, height), pygame.SRCALPHA)
+    overlay.fill((0, 0, 0, 170))
+    screen.blit(overlay, (0, 0))
+    draw_text(screen, title, 56, color, (width // 2, height // 2 - 70))
+    draw_text(screen, f"Score: {score}", 38, (255, 255, 255), (width // 2, height // 2))
+    if subtitle:
+        draw_text(screen, subtitle, 22, (255, 215, 0), (width // 2, height // 2 + 50))
+    draw_text(screen, "Press any key to return to the hub", 20, (200, 200, 200),
+              (width // 2, height // 2 + 100))
+    pygame.display.flip()
+
+    start = pygame.time.get_ticks()
+    while pygame.time.get_ticks() - start < 10000:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                return
+            if event.type == pygame.KEYDOWN and pygame.time.get_ticks() - start > 600:
+                return
+        pygame.time.wait(30)
+
+
+def random_free_cell(occupied, cols, rows):
+    free = [(x, y) for x in range(cols) for y in range(rows) if (x, y) not in occupied]
+    return random.choice(free) if free else None
+
+
+# =====================================================================
+#  GAME 1 : SNAKE
+# =====================================================================
+def play_snake(user, sound_on=True):
+    """Classic snake. Returns the final score."""
+    CELL, COLS, ROWS, TOP = 20, 30, 28, 50
+    width, height = COLS * CELL, ROWS * CELL + TOP
+    screen, clock = init_pygame_window(f"Snake - {user}", width, height)
+
+    eat_sound = make_beep(880, 90)
+    die_sound = make_beep(160, 500, 0.3)
+    music = start_music(sound_on)
+
+    snake = [(15, 14), (14, 14), (13, 14)]
+    direction = (1, 0)
+    next_direction = direction
+    food = random_free_cell(set(snake), COLS, ROWS)
+    score = 0
+    speed = 8
+    alive = True
+    window_closed = False
+
+    while alive and not window_closed:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                window_closed = True
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    window_closed = True
+                elif event.key in (pygame.K_UP, pygame.K_w) and direction != (0, 1):
+                    next_direction = (0, -1)
+                elif event.key in (pygame.K_DOWN, pygame.K_s) and direction != (0, -1):
+                    next_direction = (0, 1)
+                elif event.key in (pygame.K_LEFT, pygame.K_a) and direction != (1, 0):
+                    next_direction = (-1, 0)
+                elif event.key in (pygame.K_RIGHT, pygame.K_d) and direction != (-1, 0):
+                    next_direction = (1, 0)
+        if window_closed:
+            break
+
+        # ---- move the snake ----
+        direction = next_direction
+        head = (snake[0][0] + direction[0], snake[0][1] + direction[1])
+        eating = (head == food)
+        body = snake if eating else snake[:-1]
+        if not (0 <= head[0] < COLS and 0 <= head[1] < ROWS) or head in body:
+            alive = False
+        else:
+            snake.insert(0, head)
+            if eating:
+                score += 10
+                speed = min(8 + score // 40, 20)
+                play_sound(eat_sound, sound_on)
+                food = random_free_cell(set(snake), COLS, ROWS)
+                if food is None:           # the board is full: perfect game!
+                    alive = False
+            else:
+                snake.pop()
+
+        # ---- draw everything ----
+        screen.fill((18, 18, 40))
+        for r in range(ROWS):
+            for c in range(COLS):
+                if (r + c) % 2 == 0:
+                    pygame.draw.rect(screen, (25, 25, 55), (c * CELL, TOP + r * CELL, CELL, CELL))
+        pygame.draw.rect(screen, (30, 30, 70), (0, 0, width, TOP))
+        draw_text(screen, f"Score: {score}", 26, (255, 215, 0), (90, TOP // 2))
+        draw_text(screen, "SNAKE", 28, (255, 255, 255), (width // 2, TOP // 2))
+        draw_text(screen, f"Speed: {speed}", 22, (0, 212, 255), (width - 90, TOP // 2))
+
+        if food:
+            fx = food[0] * CELL + CELL // 2
+            fy = TOP + food[1] * CELL + CELL // 2
+            pygame.draw.circle(screen, (231, 76, 60), (fx, fy), CELL // 2 - 2)
+            pygame.draw.circle(screen, (255, 255, 255), (fx - 3, fy - 3), 3)
+
+        for i, (sx, sy) in enumerate(snake):
+            rect = pygame.Rect(sx * CELL + 1, TOP + sy * CELL + 1, CELL - 2, CELL - 2)
+            if i == 0:
+                pygame.draw.rect(screen, (0, 255, 150), rect, border_radius=7)
+                cx, cy = rect.center
+                px, py = -direction[1], direction[0]       # sideways direction
+                for side in (-1, 1):
+                    ex = cx + direction[0] * 4 + px * 4 * side
+                    ey = cy + direction[1] * 4 + py * 4 * side
+                    pygame.draw.circle(screen, (255, 255, 255), (ex, ey), 3)
+                    pygame.draw.circle(screen, (0, 0, 0), (ex, ey), 1)
+            else:
+                shade = max(90, 230 - i * 5)
+                pygame.draw.rect(screen, (30, shade, 100), rect, border_radius=6)
+
+        pygame.display.flip()
+        clock.tick(speed)
+
+    if music:
+        music.stop()
+    if not window_closed:
+        play_sound(die_sound, sound_on)
+        game_over_screen(screen, score, "GAME OVER")
+    return score
+
+
+# =====================================================================
+#  GAME 2 : PONG (player vs computer)
+# =====================================================================
+def serve_velocity(speed, direction):
+    """Random starting direction for the ball."""
+    angle = random.uniform(-0.5, 0.5)
+    return speed * direction * math.cos(angle), speed * math.sin(angle)
+
+
+def play_pong(user, sound_on=True):
+    """Pong against the computer. First to 7 points wins. Returns the score."""
+    W, H = 800, 500
+    PADDLE_W, PADDLE_H, RADIUS, WIN_POINTS = 12, 90, 9, 7
+    screen, clock = init_pygame_window(f"Pong - {user}", W, H)
+
+    hit_sound = make_beep(660, 60)
+    point_sound = make_beep(990, 200)
+    lose_sound = make_beep(200, 300, 0.3)
+    music = start_music(sound_on)
+
+    player = pygame.Rect(30, H // 2 - PADDLE_H // 2, PADDLE_W, PADDLE_H)
+    cpu = pygame.Rect(W - 30 - PADDLE_W, H // 2 - PADDLE_H // 2, PADDLE_W, PADDLE_H)
+    ball_x, ball_y = W / 2, H / 2
+    speed = 6.0
+    vx, vy = serve_velocity(speed, random.choice([-1, 1]))
+    player_points = cpu_points = 0
+    window_closed = False
+
+    while player_points < WIN_POINTS and cpu_points < WIN_POINTS:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                window_closed = True
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                window_closed = True
+            elif event.type == pygame.MOUSEMOTION:
+                player.centery = event.pos[1]
+        if window_closed:
+            break
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_UP] or keys[pygame.K_w]:
+            player.y -= 8
+        if keys[pygame.K_DOWN] or keys[pygame.K_s]:
+            player.y += 8
+        player.clamp_ip(screen.get_rect())
+
+        # computer paddle: follows the ball a little slower than it moves
+        target = ball_y if vx > 0 else H / 2
+        if cpu.centery < target - 12:
+            cpu.y += 5
+        elif cpu.centery > target + 12:
+            cpu.y -= 5
+        cpu.clamp_ip(screen.get_rect())
+
+        # move the ball and bounce off the top and bottom
+        ball_x += vx
+        ball_y += vy
+        if ball_y - RADIUS <= 0:
+            ball_y, vy = RADIUS, abs(vy)
+        elif ball_y + RADIUS >= H:
+            ball_y, vy = H - RADIUS, -abs(vy)
+
+        ball_rect = pygame.Rect(int(ball_x - RADIUS), int(ball_y - RADIUS), RADIUS * 2, RADIUS * 2)
+        if vx < 0 and ball_rect.colliderect(player):
+            speed = min(speed + 0.4, 13)
+            offset = max(-1, min(1, (ball_y - player.centery) / (PADDLE_H / 2)))
+            angle = offset * math.radians(55)
+            vx, vy = speed * math.cos(angle), speed * math.sin(angle)
+            ball_x = player.right + RADIUS + 1
+            play_sound(hit_sound, sound_on)
+        elif vx > 0 and ball_rect.colliderect(cpu):
+            speed = min(speed + 0.4, 13)
+            offset = max(-1, min(1, (ball_y - cpu.centery) / (PADDLE_H / 2)))
+            angle = offset * math.radians(55)
+            vx, vy = -speed * math.cos(angle), speed * math.sin(angle)
+            ball_x = cpu.left - RADIUS - 1
+            play_sound(hit_sound, sound_on)
+
+        # somebody scored?
+        scored = False
+        if ball_x < 0:
+            cpu_points += 1
+            play_sound(lose_sound, sound_on)
+            scored, serve_dir = True, -1
+        elif ball_x > W:
+            player_points += 1
+            play_sound(point_sound, sound_on)
+            scored, serve_dir = True, 1
+
+        # ---- draw ----
+        screen.fill((15, 20, 45))
+        for y in range(0, H, 24):
+            pygame.draw.rect(screen, (60, 70, 120), (W // 2 - 2, y, 4, 12))
+        pygame.draw.rect(screen, (0, 212, 255), player, border_radius=6)
+        pygame.draw.rect(screen, (255, 99, 132), cpu, border_radius=6)
+        pygame.draw.circle(screen, (255, 255, 255), (int(ball_x), int(ball_y)), RADIUS)
+        draw_text(screen, str(player_points), 60, (0, 212, 255), (W // 2 - 70, 50))
+        draw_text(screen, str(cpu_points), 60, (255, 99, 132), (W // 2 + 70, 50))
+        draw_text(screen, f"First to {WIN_POINTS} wins  |  W/S or mouse to move",
+                  16, (130, 140, 190), (W // 2, H - 15))
+        pygame.display.flip()
+
+        if scored:
+            ball_x, ball_y = W / 2, H / 2
+            speed = 6.0
+            vx, vy = serve_velocity(speed, serve_dir)
+            pygame.time.wait(600)
+            pygame.event.clear()
+        clock.tick(60)
+
+    if music:
+        music.stop()
+    won = player_points >= WIN_POINTS
+    score = player_points * 10 + (50 if won else 0)
+    if not window_closed:
+        if won:
+            game_over_screen(screen, score, "YOU WIN!", f"{player_points} - {cpu_points}  (+50 bonus)",
+                             (80, 255, 120))
+        else:
+            game_over_screen(screen, score, "COMPUTER WINS", f"{player_points} - {cpu_points}")
+    return score
+
+
+# =====================================================================
+#  GAME 3 : CATCH THE FALLING FRUIT
+# =====================================================================
+def play_catch(user, sound_on=True):
+    """Catch fruit, avoid bombs. Returns the final score."""
+    W, H = 700, 600
+    screen, clock = init_pygame_window(f"Catch the Fruit - {user}", W, H)
+
+    catch_sound = make_beep(784, 70)
+    gold_sound = make_beep(1175, 150)
+    bomb_sound = make_beep(120, 400, 0.35)
+    music = start_music(sound_on)
+
+    background = make_gradient(W, H, (110, 190, 250), (255, 240, 200))
+    fruit_colors = [(231, 76, 60), (241, 196, 15), (155, 89, 182), (46, 204, 113), (230, 126, 34)]
+    basket = pygame.Rect(W // 2 - 55, H - 55, 110, 28)
+
+    items = []
+    spawn_timer = 0
+    score = 0
+    lives = 3
+    window_closed = False
+
+    while lives > 0:
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                window_closed = True
+            elif event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+                window_closed = True
+            elif event.type == pygame.MOUSEMOTION:
+                basket.centerx = event.pos[0]
+        if window_closed:
+            break
+
+        keys = pygame.key.get_pressed()
+        if keys[pygame.K_LEFT] or keys[pygame.K_a]:
+            basket.x -= 10
+        if keys[pygame.K_RIGHT] or keys[pygame.K_d]:
+            basket.x += 10
+        basket.clamp_ip(screen.get_rect())
+
+        level = score // 100 + 1
+
+        # ---- spawn new items ----
+        spawn_timer += 1
+        if spawn_timer >= max(18, 55 - level * 4):
+            spawn_timer = 0
+            roll = random.random()
+            bomb_chance = min(0.18 + 0.02 * level, 0.40)
+            if roll < bomb_chance:
+                kind = "bomb"
+            elif roll < bomb_chance + 0.06:
+                kind = "gold"
+            else:
+                kind = "fruit"
+            items.append({"x": random.randint(25, W - 25), "y": -20, "r": 16, "kind": kind,
+                          "speed": 3 + level * 0.5 + random.uniform(0, 1.5),
+                          "color": random.choice(fruit_colors)})
+
+        # ---- move items and check catches ----
+        remaining = []
+        for item in items:
+            item["y"] += item["speed"]
+            r = item["r"]
+            item_rect = pygame.Rect(item["x"] - r, int(item["y"]) - r, r * 2, r * 2)
+            if item_rect.colliderect(basket):
+                if item["kind"] == "bomb":
+                    lives -= 1
+                    play_sound(bomb_sound, sound_on)
+                elif item["kind"] == "gold":
+                    score += 30
+                    play_sound(gold_sound, sound_on)
+                else:
+                    score += 10
+                    play_sound(catch_sound, sound_on)
+            elif item["y"] - r <= H:
+                remaining.append(item)
+        items = remaining
+
+        # ---- draw ----
+        screen.blit(background, (0, 0))
+        for item in items:
+            x, y, r = item["x"], int(item["y"]), item["r"]
+            if item["kind"] == "bomb":
+                pygame.draw.circle(screen, (35, 35, 40), (x, y), r)
+                pygame.draw.line(screen, (120, 80, 40), (x + 6, y - r + 3), (x + 12, y - r - 7), 3)
+                pygame.draw.circle(screen, (255, 90, 30), (x + 12, y - r - 8), 4)
+                pygame.draw.circle(screen, (90, 90, 100), (x - 5, y - 5), 4)
+            elif item["kind"] == "gold":
+                pygame.draw.circle(screen, (255, 200, 0), (x, y), r + 2)
+                pygame.draw.circle(screen, (255, 245, 150), (x, y), r - 5)
+                pygame.draw.circle(screen, (255, 255, 255), (x - 5, y - 5), 3)
+            else:
+                pygame.draw.circle(screen, item["color"], (x, y), r)
+                pygame.draw.circle(screen, (255, 255, 255), (x - 5, y - 5), 4)
+                pygame.draw.line(screen, (60, 120, 40), (x, y - r), (x + 4, y - r - 8), 3)
+
+        pygame.draw.polygon(screen, (139, 69, 19),
+                            [(basket.left, basket.top), (basket.right, basket.top),
+                             (basket.right - 15, basket.bottom), (basket.left + 15, basket.bottom)])
+        pygame.draw.rect(screen, (190, 110, 50), (basket.left - 4, basket.top - 5, basket.width + 8, 8),
+                         border_radius=4)
+
+        pygame.draw.rect(screen, (30, 30, 70), (0, 0, W, 44))
+        draw_text(screen, f"Score: {score}", 24, (255, 215, 0), (90, 22))
+        draw_text(screen, f"Level {level}", 24, (255, 255, 255), (W // 2, 22))
+        for i in range(lives):
+            pygame.draw.circle(screen, (255, 70, 90), (W - 40 - i * 30, 22), 11)
+            pygame.draw.circle(screen, (255, 255, 255), (W - 44 - i * 30, 18), 3)
+        pygame.display.flip()
+        clock.tick(60)
+
+    if music:
+        music.stop()
+    if not window_closed:
+        game_over_screen(screen, score, "GAME OVER", "A bomb got you!")
+    return score
+
+
+# =====================================================================
+#  GAME REGISTRY (name -> colour, description, function)
+# =====================================================================
+GAMES = {
+    "Snake": {"color": "#2ecc71", "func": play_snake,
+              "desc": "Eat apples, grow longer and don't crash!"},
+    "Pong": {"color": "#3498db", "func": play_pong,
+             "desc": "Beat the computer. First to 7 points wins."},
+    "Catch": {"color": "#e67e22", "func": play_catch,
+              "desc": "Catch the fruit and dodge the bombs."},
+}
+
+
+def launch_game(game_name):
+    """Hide the hub, run the pygame game, then bring the hub back."""
+    if not PYGAME_OK:
+        messagebox.showerror("pygame missing",
+                             "pygame is not installed.\n\nOpen a terminal and run:\npip install pygame")
+        return
+
+    previous_best = 0 if is_guest() else get_best_score(current_user, game_name)
+    error = None
+    score = 0
+
+    root.withdraw()                      # tkinter and pygame must not run together
+    try:
+        score = GAMES[game_name]["func"](current_user, settings["sound"])
+    except Exception as exc:             # never let a game bug close the whole hub
+        error = exc
+    finally:
+        try:
+            pygame.quit()
+        except Exception:
+            pass
+        root.deiconify()
+        root.lift()
+        root.update()
+
+    if error is not None:
+        messagebox.showerror("Game error", f"The game stopped unexpectedly:\n{error}")
+        return
+
+    if is_guest():
+        message = f"You scored {score} points!\n\nGuest scores are not saved.\nRegister to join the leaderboard."
+    else:
+        if score > 0:
+            save_score(current_user, game_name, score)
+        message = f"You scored {score} points!"
+        if score > previous_best and score > 0:
+            message += "\n\nNEW PERSONAL BEST!"
+    messagebox.showinfo(f"{game_name} - Finished", message)
+    show_dashboard()
+
+
+# =====================================================================
+#  TKINTER HELPERS
+# =====================================================================
+def lighten(hex_color, amount=30):
+    r, g, b = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
+    return "#%02x%02x%02x" % tuple(min(255, v + amount) for v in (r, g, b))
+
+
+def make_button(parent, text, command, color="#2196F3", width=16, font_size=12):
+    button = tk.Button(parent, text=text, command=command, bg=color, fg="white",
+                       activebackground=lighten(color), activeforeground="white",
+                       relief="flat", bd=0, width=width, pady=6, cursor="hand2",
+                       font=("Arial", font_size, "bold"))
+    button.bind("<Enter>", lambda e: button.config(bg=lighten(color)))
+    button.bind("<Leave>", lambda e: button.config(bg=color))
+    return button
+
+
+def make_entry(parent, show=None):
+    c = colors()
+    return tk.Entry(parent, show=show, width=24, font=("Arial", 14), bg=c["entry"], fg=c["fg"],
+                    insertbackground=c["fg"], relief="flat")
+
+
+def make_label(parent, text, size=12, bold=False, color=None, bg=None, **kwargs):
+    c = colors()
+    return tk.Label(parent, text=text, font=("Arial", size, "bold" if bold else "normal"),
+                    fg=color or c["fg"], bg=bg or parent["bg"], **kwargs)
+
+
+def clear_root():
+    for widget in root.winfo_children():
+        widget.destroy()
+    root.configure(bg=colors()["bg"])
+
+
+def rainbow_title(parent, text, size=36):
+    frame = tk.Frame(parent, bg=parent["bg"])
+    frame.letters = []
+    for i, ch in enumerate(text):
+        label = tk.Label(frame, text=ch if ch != " " else "  ", font=("Arial", size, "bold"),
+                         fg=RAINBOW[i % len(RAINBOW)], bg=parent["bg"])
+        label.pack(side="left")
+        frame.letters.append(label)
+    return frame
+
+
+def animate_rainbow(frame, shift=0):
+    """Make the title letters cycle through the rainbow colours."""
+    try:
+        if not frame.winfo_exists():
+            return
+        for i, label in enumerate(frame.letters):
+            label.config(fg=RAINBOW[(i + shift) % len(RAINBOW)])
+        root.after(300, lambda: animate_rainbow(frame, shift + 1))
+    except tk.TclError:
+        pass
+
+
+def build_header(title, back_command=None):
+    c = colors()
+    bar = tk.Frame(root, bg=c["panel"])
+    bar.pack(fill="x")
+    if back_command:
+        make_button(bar, "< Back", back_command, "#607D8B", 8, 10).pack(side="left", padx=12, pady=10)
+    tk.Label(bar, text=title, font=("Arial", 20, "bold"), bg=c["panel"], fg=c["accent"]).pack(side="left", padx=8)
+    tk.Label(bar, text=f"Player: {current_user}", font=("Arial", 12), bg=c["panel"],
+             fg=c["muted"]).pack(side="right", padx=18)
+    return bar
+
+
+def draw_game_icon(canvas, game):
+    """Little pictures drawn with code, so no image files are needed."""
+    if game == "Snake":
+        cells = [(1, 3), (2, 3), (2, 2), (2, 1), (3, 1), (4, 1), (4, 2), (5, 2)]
+        for i, (x, y) in enumerate(cells):
+            green = "#%02x%02x%02x" % (40, min(255, 120 + i * 18), 90)
+            canvas.create_rectangle(10 + x * 22, 10 + y * 22, 30 + x * 22, 30 + y * 22, fill=green, outline="")
+        canvas.create_oval(120, 38, 128, 46, fill="white", outline="")
+        canvas.create_oval(120, 56, 128, 64, fill="white", outline="")
+        canvas.create_oval(14, 28, 32, 46, fill="#e74c3c", outline="")
+    elif game == "Pong":
+        canvas.create_rectangle(20, 25, 30, 85, fill="#00d4ff", outline="")
+        canvas.create_rectangle(130, 35, 140, 95, fill="#ff6384", outline="")
+        canvas.create_oval(72, 47, 88, 63, fill="white", outline="")
+        canvas.create_line(80, 5, 80, 105, dash=(4, 4), fill="#7a80b0", width=2)
+    elif game == "Catch":
+        canvas.create_oval(50, 8, 74, 32, fill="#e74c3c", outline="")
+        canvas.create_oval(95, 30, 115, 50, fill="#f1c40f", outline="")
+        canvas.create_oval(78, 4, 96, 22, fill="#9b59b6", outline="")
+        canvas.create_polygon(40, 70, 120, 70, 108, 102, 52, 102, fill="#8b4513", outline="")
+        canvas.create_rectangle(36, 64, 124, 72, fill="#be6e32", outline="")
+
+
+# =====================================================================
+#  TKINTER SCREENS
+# =====================================================================
+def show_welcome_screen():
+    global current_user
+    current_user = None
+    clear_root()
+    c = colors()
+
+    tk.Frame(root, bg=c["bg"], height=60).pack()
+    title = rainbow_title(root, "GAME ZONE HUB", 40)
+    title.pack()
+    animate_rainbow(title)
+    make_label(root, "Register  -  Play  -  Beat the leaderboard!", 14, color=c["muted"]).pack(pady=(8, 35))
+
+    make_button(root, "LOGIN", show_login_screen, "#4CAF50", 22, 14).pack(pady=7)
+    make_button(root, "REGISTER", show_register_screen, "#2196F3", 22, 14).pack(pady=7)
+    make_button(root, "PLAY AS GUEST", start_guest_session, "#9C27B0", 22, 14).pack(pady=7)
+    make_button(root, "EXIT", on_exit, "#e74c3c", 22, 14).pack(pady=7)
+
+    if not PYGAME_OK:
+        make_label(root, "pygame is not installed - run: pip install pygame", 10, color="#ff6b6b").pack(pady=15)
+
+
+def start_guest_session():
+    global current_user
+    current_user = GUEST_NAME
+    show_dashboard()
+
+
+def show_register_screen():
+    clear_root()
+    c = colors()
+    build_header("Create Account", show_welcome_screen)
+
+    box = tk.Frame(root, bg=c["panel"], padx=40, pady=30)
+    box.pack(pady=40)
+    make_label(box, "New Username:", 12).pack(pady=(0, 3))
+    user_entry = make_entry(box)
+    user_entry.pack(ipady=5)
+    make_label(box, "New Password:", 12).pack(pady=(14, 3))
+    pass_entry = make_entry(box, show="*")
+    pass_entry.pack(ipady=5)
+    make_label(box, "Confirm Password:", 12).pack(pady=(14, 3))
+    confirm_entry = make_entry(box, show="*")
+    confirm_entry.pack(ipady=5)
+
+    def process_registration(event=None):
+        username = user_entry.get().strip()
+        password = pass_entry.get().strip()
+        if not username or not password:
+            messagebox.showerror("Error", "Username and Password cannot be empty!")
+            return
+        if password != confirm_entry.get().strip():
+            messagebox.showerror("Error", "Passwords do not match!")
+            return
+        ok, message = register_user(username, password)
+        if ok:
+            messagebox.showinfo("Success", message)
+            show_login_screen()
+        else:
+            messagebox.showerror("Error", message)
+
+    make_button(box, "SUBMIT REGISTRATION", process_registration, "#2196F3", 24).pack(pady=(25, 0))
+    root.bind("<Return>", process_registration)
+    user_entry.focus_set()
+
+
+def show_login_screen():
+    global current_user
+    clear_root()
+    c = colors()
+    build_header("Login", show_welcome_screen)
+
+    box = tk.Frame(root, bg=c["panel"], padx=40, pady=30)
+    box.pack(pady=50)
+    make_label(box, "Username:", 12).pack(pady=(0, 3))
+    user_entry = make_entry(box)
+    user_entry.pack(ipady=5)
+    make_label(box, "Password:", 12).pack(pady=(14, 3))
+    pass_entry = make_entry(box, show="*")
+    pass_entry.pack(ipady=5)
+
+    def process_login(event=None):
+        global current_user
+        username = user_entry.get().strip()
+        password = pass_entry.get().strip()
+        stored_name = verify_login(username, password)
+        if stored_name:
+            current_user = stored_name
+            messagebox.showinfo("Success", f"Welcome back, {stored_name}!")
+            show_dashboard()
+        else:
+            messagebox.showerror("Error", "Invalid Username or Password!\nMake sure you have registered.")
+
+    make_button(box, "LOGIN", process_login, "#4CAF50", 24).pack(pady=(25, 0))
+    root.bind("<Return>", process_login)
+    user_entry.focus_set()
+
+
+def logout():
+    if messagebox.askyesno("Logout", "Do you want to log out?"):
+        show_welcome_screen()
+
+
+def show_dashboard():
+    clear_root()
+    root.unbind("<Return>")
+    c = colors()
+
+    header = tk.Frame(root, bg=c["panel"])
+    header.pack(fill="x")
+    tk.Label(header, text="GAME ZONE HUB", font=("Arial", 22, "bold"), bg=c["panel"],
+             fg=c["accent"]).pack(side="left", padx=20, pady=12)
+    tk.Label(header, text=f"Welcome, {current_user}!", font=("Arial", 13), bg=c["panel"],
+             fg=c["fg"]).pack(side="left", padx=10)
+    make_button(header, "Logout", logout, "#e74c3c", 9, 10).pack(side="right", padx=14)
+
+    make_label(root, "Choose a game", 18, True, c["fg"]).pack(pady=(22, 0))
+
+    cards = tk.Frame(root, bg=c["bg"])
+    cards.pack(pady=18)
+    for column, (name, info) in enumerate(GAMES.items()):
+        card = tk.Frame(cards, bg=c["panel"], padx=14, pady=14,
+                        highlightthickness=3, highlightbackground=info["color"])
+        card.grid(row=0, column=column, padx=14)
+        icon = tk.Canvas(card, width=160, height=110, bg=c["panel"], highlightthickness=0)
+        icon.pack()
+        draw_game_icon(icon, name)
+        make_label(card, name.upper(), 18, True, info["color"]).pack(pady=(8, 2))
+        make_label(card, info["desc"], 10, color=c["muted"], wraplength=180, justify="center").pack()
+        if is_guest():
+            best_text = "Guest - scores not saved"
+        else:
+            best_text = f"Your best: {get_best_score(current_user, name)}"
+        make_label(card, best_text, 11, True, c["fg"]).pack(pady=8)
+        make_button(card, "PLAY", lambda n=name: launch_game(n), info["color"], 14).pack()
+
+    menu = tk.Frame(root, bg=c["bg"])
+    menu.pack(pady=12)
+    make_button(menu, "Leaderboard", show_leaderboard, "#f39c12", 14, 11).grid(row=0, column=0, padx=8)
+    make_button(menu, "My Profile", show_profile, "#8e44ad", 14, 11).grid(row=0, column=1, padx=8)
+    make_button(menu, "Settings", show_settings, "#16a085", 14, 11).grid(row=0, column=2, padx=8)
+    make_button(menu, "How to Play", show_help, "#2980b9", 14, 11).grid(row=0, column=3, padx=8)
+
+
+def show_leaderboard(selected="All Games"):
+    clear_root()
+    c = colors()
+    build_header("Leaderboard", show_dashboard)
+
+    top = tk.Frame(root, bg=c["bg"])
+    top.pack(pady=15)
+    make_label(top, "Show scores for:", 12).pack(side="left")
+    choice = tk.StringVar(value=selected)
+    combo = ttk.Combobox(top, textvariable=choice, values=["All Games"] + list(GAMES.keys()),
+                         state="readonly", width=14, font=("Arial", 12))
+    combo.pack(side="left", padx=10)
+
+    style = ttk.Style()
+    style.theme_use("clam")
+    style.configure("Hub.Treeview", background=c["panel"], foreground=c["fg"],
+                    fieldbackground=c["panel"], rowheight=34, font=("Arial", 12))
+    style.configure("Hub.Treeview.Heading", background=c["accent"], foreground="#000000",
+                    font=("Arial", 12, "bold"))
+    style.map("Hub.Treeview", background=[("selected", c["entry"])], foreground=[("selected", c["fg"])])
+
+    tree = ttk.Treeview(root, columns=("rank", "player", "score"), show="headings",
+                        style="Hub.Treeview", height=10)
+    tree.heading("rank", text="Rank")
+    tree.heading("player", text="Player")
+    tree.heading("score", text="Score")
+    tree.column("rank", width=90, anchor="center")
+    tree.column("player", width=300, anchor="center")
+    tree.column("score", width=150, anchor="center")
+    tree.tag_configure("gold", foreground="#e0a800")
+    tree.tag_configure("silver", foreground="#8e9aaf")
+    tree.tag_configure("bronze", foreground="#cd7f32")
+    tree.pack(pady=5)
+
+    note = make_label(root, "", 12, color=c["muted"])
+    note.pack(pady=8)
+
+    def refresh(event=None):
+        tree.delete(*tree.get_children())
+        game = None if choice.get() == "All Games" else choice.get()
+        rows = get_top_scores(game)
+        for rank, (name, score) in enumerate(rows, start=1):
+            tag = {1: "gold", 2: "silver", 3: "bronze"}.get(rank, "")
+            tree.insert("", "end", values=(rank, name, score), tags=(tag,))
+        note.config(text="" if rows else "No scores yet - be the first to play!")
+
+    combo.bind("<<ComboboxSelected>>", refresh)
+    refresh()
+
+
+def show_profile():
+    if is_guest():
+        messagebox.showinfo("Guest", "Guests do not have a profile.\nRegister an account to track your scores!")
+        return
+    clear_root()
+    c = colors()
+    build_header("My Profile", show_dashboard)
+
+    history = get_user_history(current_user)
+    stats = tk.Frame(root, bg=c["panel"], padx=20, pady=10)
+    stats.pack(fill="x", padx=25, pady=12)
+    make_label(stats, f"Games played: {len(history)}", 13, True, c["accent"], bg=c["panel"]).pack(side="left", padx=15)
+    for name, info in GAMES.items():
+        make_label(stats, f"{name} best: {get_best_score(current_user, name)}", 13, True,
+                   info["color"], bg=c["panel"]).pack(side="left", padx=15)
+
+    chart_frame = tk.Frame(root, bg=c["panel"])
+    chart_frame.pack(fill="both", expand=True, padx=25, pady=(0, 15))
+
+    if not MPL_OK:
+        make_label(chart_frame, "Install matplotlib to see your chart:\npip install matplotlib",
+                   13, bg=c["panel"]).pack(expand=True)
+        return
+    if not history:
+        make_label(chart_frame, "No games played yet.\nPlay a game and your score chart will appear here!",
+                   14, bg=c["panel"]).pack(expand=True)
+        return
+
+    figure = Figure(figsize=(8, 3.6), dpi=100, facecolor=c["panel"])
+    axes = figure.add_subplot(111)
+    axes.set_facecolor(c["panel"])
+    for name, info in GAMES.items():
+        scores = [s for g, s, _ in history if g == name]
+        if scores:
+            axes.plot(range(1, len(scores) + 1), scores, marker="o", linewidth=2.5,
+                      color=info["color"], label=name)
+    axes.set_title("My score history", color=c["fg"], fontsize=14, fontweight="bold")
+    axes.set_xlabel("Attempt number", color=c["fg"])
+    axes.set_ylabel("Score", color=c["fg"])
+    axes.tick_params(colors=c["fg"])
+    axes.xaxis.set_major_locator(MaxNLocator(integer=True))
+    axes.grid(alpha=0.25)
+    for spine in axes.spines.values():
+        spine.set_color(c["muted"])
+    legend = axes.legend(facecolor=c["panel"], edgecolor=c["muted"])
+    for text in legend.get_texts():
+        text.set_color(c["fg"])
+    figure.tight_layout()
+
+    canvas = FigureCanvasTkAgg(figure, master=chart_frame)
+    canvas.draw()
+    canvas.get_tk_widget().pack(fill="both", expand=True)
+
+
+def show_settings():
+    clear_root()
+    c = colors()
+    build_header("Settings", show_dashboard)
+
+    box = tk.Frame(root, bg=c["panel"], padx=50, pady=30)
+    box.pack(pady=35)
+
+    sound_var = tk.BooleanVar(value=settings["sound"])
+    theme_var = tk.StringVar(value=settings["theme"])
+
+    make_label(box, "Sound", 15, True, c["accent"], bg=c["panel"]).pack(anchor="w")
+    tk.Checkbutton(box, text="Sound effects and music", variable=sound_var, font=("Arial", 12),
+                   bg=c["panel"], fg=c["fg"], selectcolor=c["entry"], activebackground=c["panel"],
+                   activeforeground=c["fg"]).pack(anchor="w", pady=(4, 20))
+
+    make_label(box, "Theme", 15, True, c["accent"], bg=c["panel"]).pack(anchor="w")
+    for value, text in (("dark", "Dark mode"), ("light", "Light mode")):
+        tk.Radiobutton(box, text=text, value=value, variable=theme_var, font=("Arial", 12),
+                       bg=c["panel"], fg=c["fg"], selectcolor=c["entry"], activebackground=c["panel"],
+                       activeforeground=c["fg"]).pack(anchor="w", pady=2)
+
+    def apply_settings():
+        settings["sound"] = sound_var.get()
+        settings["theme"] = theme_var.get()
+        save_settings()
+        show_settings()
+        messagebox.showinfo("Settings", "Settings saved!")
+
+    def clear_scores():
+        if is_guest():
+            messagebox.showinfo("Guest", "Guests have no saved scores.")
+        elif messagebox.askyesno("Confirm", "Delete ALL your saved scores? This cannot be undone."):
+            delete_user_scores(current_user)
+            messagebox.showinfo("Done", "Your scores were deleted.")
+
+    make_button(box, "SAVE SETTINGS", apply_settings, "#4CAF50", 22).pack(pady=(25, 8))
+    make_button(box, "CLEAR MY SCORES", clear_scores, "#e74c3c", 22).pack()
+
+
+def show_help():
+    clear_root()
+    c = colors()
+    build_header("How to Play", show_dashboard)
+
+    help_text = {
+        "Snake": "Arrow keys or W A S D to steer. Eat the red apples (+10). "
+                 "Don't hit the walls or yourself. The snake speeds up as you score!",
+        "Pong": "Move your paddle with W / S, the Up / Down arrows or the mouse. "
+                "First to 7 points wins and earns a +50 bonus. Each point is worth 10.",
+        "Catch": "Move the basket with the Left / Right arrows, A / D or the mouse. "
+                 "Fruit = +10, golden fruit = +30. Catching a bomb costs a life (3 lives).",
+    }
+    for name, info in GAMES.items():
+        card = tk.Frame(root, bg=c["panel"], padx=20, pady=12, highlightthickness=2,
+                        highlightbackground=info["color"])
+        card.pack(fill="x", padx=40, pady=9)
+        make_label(card, name.upper(), 15, True, info["color"], bg=c["panel"]).pack(anchor="w")
+        make_label(card, help_text[name], 11, bg=c["panel"], wraplength=780, justify="left").pack(anchor="w", pady=3)
+    make_label(root, "Press ESC inside any game to quit it early. Scores are saved when you finish.",
+               11, color=c["muted"]).pack(pady=10)
+
+
+def on_exit():
+    if messagebox.askyesno("Exit", "Close Game Zone Hub?"):
+        root.destroy()
+
+
+# =====================================================================
+#  MAIN
+# =====================================================================
+def main():
+    global root, settings
+    init_database()
+    settings = load_settings()
+
+    root = tk.Tk()
+    root.title("GAME ZONE HUB")
+    width, height = 920, 680
+    x = (root.winfo_screenwidth() - width) // 2
+    y = max(0, (root.winfo_screenheight() - height) // 2 - 20)
+    root.geometry(f"{width}x{height}+{x}+{y}")
+    root.resizable(False, False)
+    root.protocol("WM_DELETE_WINDOW", on_exit)
+
+    show_welcome_screen()
+    root.mainloop()
+
+
+if __name__ == "__main__":
+    main()
